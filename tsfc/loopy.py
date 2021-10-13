@@ -23,7 +23,6 @@ from contextlib import contextmanager
 
 global matfree_solve_knl
 matfree_solve_knl = None
-maxtype = partial(numpy.find_common_type, [])
 
 
 @singledispatch
