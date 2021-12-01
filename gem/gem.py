@@ -868,7 +868,6 @@ class Action(Node):
     id = 0
 
     def __new__(cls, A, B, pick_op, name=""):
-        # Shape requirements
         assert B.shape
         assert len(A.shape) == 2
         assert A.shape[pick_op] == B.shape[0]
