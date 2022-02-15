@@ -39,7 +39,7 @@ def profile_insns(kernel_name, instructions):
         prepend += [lp.CInstruction("", start_event+"("+event_id_var_name+",0,0,0,0);")]
         append = [lp.CInstruction("", end_event+"("+event_id_var_name+",0,0,0,0);")]
         instructions = prepend + instructions + append
-    return instructions
+    return instructions, event_name
 
 
 class _PreambleGen(ImmutableRecord):
@@ -244,7 +244,7 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     instructions = statement(impero_c.tree, ctx)
 
     # Profile the instructions
-    instructions = profile_insns(kernel_name, instructions)
+    instructions, event = profile_insns(kernel_name, instructions)
 
     # Create domains
     domains = create_domains(ctx.index_extent.items())
@@ -260,7 +260,7 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Prevent loopy interchange by loopy
     knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
 
-    return knl
+    return knl, event
 
 
 def create_domains(indices):

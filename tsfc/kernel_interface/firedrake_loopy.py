@@ -20,7 +20,8 @@ from tsfc.loopy import generate as generate_loopy
 
 # Expression kernel description type
 ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'needs_cell_sizes', 'coefficients',
-                                                   'first_coefficient_fake_coords', 'tabulations', 'name', 'arguments', 'flop_count'])
+                                                   'first_coefficient_fake_coords', 'tabulations', 'name', 'arguments', 'flop_count',
+                                                   'event'])
 
 
 def make_builder(*args, **kwargs):
@@ -30,7 +31,7 @@ def make_builder(*args, **kwargs):
 class Kernel:
     __slots__ = ("ast", "arguments", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations",
-                 "coefficient_numbers", "name", "flop_count",
+                 "coefficient_numbers", "name", "flop_count", "event"
                  "__weakref__")
     """A compiled Kernel object.
 
@@ -54,7 +55,7 @@ class Kernel:
                  needs_cell_sizes=False,
                  tabulations=None,
                  flop_count=0,
-                 name=None):
+                 name=None, event=[]):
         # Defaults
         self.ast = ast
         self.arguments = arguments
@@ -67,6 +68,7 @@ class Kernel:
         self.tabulations = tabulations
         self.flop_count = flop_count
         self.name = name
+        self.event = event
 
 
 class KernelBuilderBase(_KernelBuilderBase):
@@ -331,7 +333,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             tab_loopy_arg = lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape)
             args.append(kernel_args.TabulationKernelArg(tab_loopy_arg))
         index_names = get_index_names(ctx['quadrature_indices'], self.argument_multiindices, ctx['index_cache'])
-        ast = generate_loopy(impero_c, [arg.loopy_arg for arg in args],
+        ast, event = generate_loopy(impero_c, [arg.loopy_arg for arg in args],
                              self.scalar_type, name, index_names)
         flop_count = count_flops(impero_c)  # Estimated total flops for this kernel.
         return Kernel(ast=ast,
@@ -344,7 +346,8 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                       needs_cell_sizes=needs_cell_sizes,
                       tabulations=tabulations,
                       flop_count=flop_count,
-                      name=name)
+                      name=name,
+                      event=event)
 
     def construct_empty_kernel(self, name):
         """Return None, since Firedrake needs no empty kernels.
