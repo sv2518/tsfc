@@ -1,5 +1,5 @@
 import numpy
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 from functools import partial
 
 from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
@@ -224,6 +224,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.diagonal = diagonal
         self.local_tensor = None
         self.coefficient_split = {}
+        self.coefficient_number_index_map = OrderedDict()
         self.dont_split = frozenset(dont_split)
 
         # Facet number
@@ -279,26 +280,32 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         :arg integral_data: UFL integral data
         :arg form_data: UFL form data
         """
-        coefficients = []
         # enabled_coefficients is a boolean array that indicates which
         # of reduced_coefficients the integral requires.
+        n, k = 0, 0
         for i in range(len(integral_data.enabled_coefficients)):
             if integral_data.enabled_coefficients[i]:
                 original = form_data.reduced_coefficients[i]
                 coefficient = form_data.function_replace_map[original]
                 if type(coefficient.ufl_element()) == ufl_MixedElement:
                     if original in self.dont_split:
-                        coefficients.append(coefficient)
                         self.coefficient_split[coefficient] = [coefficient]
+                        self._coefficient(coefficient, f"w_{k}")
+                        self.coefficient_number_index_map[coefficient] = (n, 0)
+                        k += 1
                     else:
-                        split = [Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
-                                 for element in coefficient.ufl_element().sub_elements()]
-                        coefficients.extend(split)
-                        self.coefficient_split[coefficient] = split
+                        self.coefficient_split[coefficient] = []
+                        for j, element in enumerate(coefficient.ufl_element().sub_elements()):
+                            c = Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
+                            self.coefficient_split[coefficient].append(c)
+                            self._coefficient(c, f"w_{k}")
+                            self.coefficient_number_index_map[c] = (n, j)
+                            k += 1
                 else:
-                    coefficients.append(coefficient)
-        for i, coefficient in enumerate(coefficients):
-            self._coefficient(coefficient, f"w_{i}")
+                    self._coefficient(coefficient, f"w_{k}")
+                    self.coefficient_number_index_map[coefficient] = (n, 0)
+                    k += 1
+                n += 1
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
@@ -315,7 +322,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         :arg ctx: kernel builder context to get impero_c from
         :returns: :class:`Kernel` object
         """
-        impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem(ctx)
+        impero_c, oriented, needs_cell_sizes, tabulations, active_variables = self.compile_gem(ctx)
         if impero_c is None:
             return self.construct_empty_kernel(name)
         info = self.integral_data_info
@@ -333,11 +340,17 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         if needs_cell_sizes:
             funarg = self.generate_arg_from_expression(self._cell_sizes)
             args.append(kernel_args.CellSizesKernelArg(funarg))
-        for coeff, expr in self.coefficient_map.items():
-            if coeff in self.domain_coordinate.values():
-                continue
-            funarg = self.generate_arg_from_expression(expr)
-            args.append(kernel_args.CoefficientKernelArg(funarg))
+        coefficient_indices = OrderedDict()
+        for coeff, (number, index) in self.coefficient_number_index_map.items():
+            a = coefficient_indices.setdefault(number, [])
+            expr = self.coefficient_map[coeff]
+            var, = gem.extract_type(expr if isinstance(expr, tuple) else (expr, ), gem.Variable)
+            if var in active_variables:
+                funarg = self.generate_arg_from_expression(expr)
+                args.append(kernel_args.CoefficientKernelArg(funarg))
+                a.append(index)
+        coefficient_indices = tuple(tuple(v) for v in coefficient_indices.values())
+        assert len(coefficient_indices) == len(info.coefficient_numbers)
         if info.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             ext_loopy_arg = lp.GlobalArg("facet", numpy.uint32, shape=(1,))
             args.append(kernel_args.ExteriorFacetKernelArg(ext_loopy_arg))
@@ -356,7 +369,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                       integral_type=info.integral_type,
                       subdomain_id=info.subdomain_id,
                       domain_number=info.domain_number,
-                      coefficient_numbers=info.coefficient_numbers,
+                      coefficient_numbers=tuple(zip(info.coefficient_numbers, coefficient_indices)),
                       oriented=oriented,
                       needs_cell_sizes=needs_cell_sizes,
                       tabulations=tabulations,
