@@ -337,7 +337,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         return Kernel(ast=ast,
                       arguments=tuple(args),
                       integral_type=info.integral_type,
-                      subdomain_id=info.subdomain_id,
                       domain_number=info.domain_number,
                       coefficient_numbers=info.coefficient_numbers,
                       oriented=oriented,
